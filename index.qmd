@@ -1,0 +1,1535 @@
+---
+title: '**Chapter 12 Lab**'
+author: "Jeremy Selva"
+subtitle: This document was prepared on `r format(Sys.Date())`.
+knitr:
+  opts_chunk:
+    comment: ">"
+    dpi: 600
+    fig-path: "docs/figures/"
+    fig-align: "center"
+    tidy: "styler"
+format:
+  html:
+    theme: cerulean
+    highlight-style: pygments
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    number-sections: false
+    code-fold: show
+    code-overflow: scroll
+    code-line-numbers: true
+    code-copy: hover
+    code-tools: true
+    code-link: true
+    self-contained: false
+    smooth-scroll: true
+    fig-height: 4
+    fig-width: 6.472
+---
+
+```{r setup, warning=FALSE, message=TRUE, include=FALSE}
+# Set up the environment
+hook_output <- knitr::knit_hooks$get('output')
+
+knitr::knit_hooks$set(
+  output = function(x, options) {
+    if (!is.null(options$max.height)) {
+      options$attr.output <- c(options$attr.output,
+                               sprintf('style="max-height: %s;"', options$max.height))
+    }
+    hook_output(x, options)
+    }
+  )
+
+```
+
+```{r, results='asis'}
+#| warning: false
+#| message: false
+#| code-fold: true
+
+# Rmarkdown stuff
+library(rmarkdown, quietly=TRUE)
+library(knitr, quietly=TRUE)
+library(htmltools, quietly=TRUE)
+library(styler, quietly=TRUE)
+library(xaringanExtra, quietly=TRUE)
+
+# Dataset
+library(ISLR2, quietly=TRUE)
+
+# Session info and package reporting
+library(report, quietly=TRUE)
+
+# Data wrangling
+library(dplyr, quietly=TRUE)
+library(tidyr, quietly=TRUE)
+library(magrittr, quietly=TRUE)
+library(purrr, quietly=TRUE)
+library(tibble, quietly=TRUE)
+library(stringr, quietly=TRUE)
+
+# Matrix Completion
+library(softImpute, quietly=TRUE)
+
+# Create interactive tables
+library(reactable, quietly=TRUE)
+
+# For plotting
+library(tidytext, quietly=TRUE)
+library(scales, quietly=TRUE)
+library(forcats, quietly=TRUE)
+library(grid, quietly=TRUE)
+library(ggplot2, quietly=TRUE)
+library(gridExtra, quietly=TRUE)
+library(grDevices, quietly=TRUE)
+library(cowplot, quietly=TRUE)
+library(ggforce, quietly=TRUE)
+
+# For applying tidymodels
+library(recipes, quietly=TRUE)
+library(parsnip, quietly=TRUE)
+library(broom, quietly=TRUE)
+library(yardstick, quietly=TRUE)
+
+# For clustering
+library(proxy, quietly=TRUE)
+library(factoextra, quietly=TRUE)
+library(cluster, quietly=TRUE)
+
+summary(report::report(sessionInfo()))
+```
+
+# Principal Components Analysis
+
+The
+[`USArrests`](https://stat.ethz.ch/R-manual/R-devel/library/datasets/html/USArrests.html)
+data set from the `datasets` package contains statistics, in arrests per
+100,000 residents for assault, murder, and rape in each of the 50 US
+states in 1973. Also given is the percent of the population living in
+urban areas.
+
+| Column Name | Column Description                              |
+|-------------|-------------------------------------------------|
+| `Murder`    | Number of arrests for murder (per 100,000)      |
+| `Assault`   | Number of arrests for assault (per 100,000)     |
+| `UrbanPop`  | Percent of the population living in urban areas |
+| `Rape`      | Number of arrests for rape (per 100,000)        |
+
+Turn [`USArrests`](https://stat.ethz.ch/R-manual/R-devel/library/datasets/html/USArrests.html) into a tibble and move the rownames into a column.
+
+```{r get data}
+#| message: false
+
+USArrests <- dplyr::as_tibble(datasets::USArrests,
+                             rownames = "state")
+
+USArrests %>%
+  reactable::reactable(defaultPageSize = 5,
+                       filterable = TRUE)
+```
+
+We create a recipe with [`recipes::recipe`](https://recipes.tidymodels.org/reference/recipe.html),
+[`recipes::all_numeric_predictors()`](https://recipes.tidymodels.org/reference/has_role.html),
+[`recipes::step_normalize`](https://recipes.tidymodels.org/reference/step_normalize.html)
+and [`recipes::step_pca`](https://recipes.tidymodels.org/reference/step_pca.html)
+
+By default, [`recipes::step_pca`](https://recipes.tidymodels.org/reference/step_pca.html) uses [`stats::prcomp`](https://rdrr.io/r/stats/prcomp.html) with the argument defaults set to `retx = FALSE`, `center = FALSE`, `scale. = FALSE`, and `tol = NULL`.
+
+
+```{r}
+#| message: false
+
+pca_recipe <- recipes::recipe(formula = ~., 
+                              data = USArrests) %>%
+  recipes::step_normalize(recipes::all_numeric_predictors()) %>%
+  recipes::step_pca(recipes::all_numeric_predictors(),
+                    id = "pca",
+                    num_comp = 4)
+
+pca_recipe
+```
+
+Apply
+[`recipes::prep`](https://recipes.tidymodels.org/reference/prep.html)
+and
+[`recipes::bake`](https://recipes.tidymodels.org/reference/bake.html) to
+compute the scores of the principal component analysis.
+
+```{r}
+#| message: false
+
+pca_estimates <- recipes::prep(x = pca_recipe, training = USArrests)
+  
+pca_estimates %>%
+  summary() %>%
+  reactable::reactable(defaultPageSize = 5)
+
+```
+
+```{r}
+#| message: false
+
+pca_score <- pca_estimates %>%
+  recipes::bake(new_data = USArrests)
+  
+  
+pca_score %>%  
+  reactable::reactable(defaultPageSize = 5)
+
+```
+
+We can explore the results of the PCA using the [`recipes::prep`](https://recipes.tidymodels.org/reference/prep.html) and
+[`parsnip::tidy`](https://parsnip.tidymodels.org/reference/tidy.model_fit.html). We can see that pca is done at step number 2
+
+```{r}
+#| message: false
+
+pca_estimates %>%
+  parsnip::tidy() %>%
+  reactable::reactable(defaultPageSize = 5)
+```
+
+As such, we extract the pca loadings of the pca step.
+
+```{r}
+#| message: false
+
+tidied_pca_loadings <- pca_estimates %>%
+  parsnip::tidy(id = "pca", type = "coef")
+
+
+tidied_pca_loadings %>%
+  reactable::reactable(defaultPageSize = 5)
+
+```
+
+We make a visualization to see how the loadings of the four components look like
+
+```{r, fig.height = 8}
+#| message: false
+
+tidied_pca_loadings %>%
+  dplyr::filter(.data[["component"]] %in% c("PC1", "PC2", "PC3", "PC4")) %>%
+  dplyr::mutate(component = forcats::fct_inorder(.data[["component"]])) %>%
+  ggplot2::ggplot(mapping = ggplot2::aes(x = .data[["value"]], 
+                                         y = .data[["terms"]], 
+                                         fill = .data[["terms"]])) +
+  ggplot2::geom_col(show.legend = FALSE) +
+  ggplot2::facet_wrap(facets = ggplot2::vars(.data[["component"]])) +
+  ggplot2::labs(y = NULL)
+
+```
+
+Let us take a closer look at the four variables that contribute to the
+four components  
+
+```{r}
+#| message: false
+
+tidied_pca_loadings %>%
+  dplyr::filter(.data[["component"]] %in% c("PC1", "PC2", "PC3", "PC4")) %>%
+  dplyr::group_by(.data[["component"]]) %>%
+  dplyr::top_n(4, abs(.data[["value"]])) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(
+    terms = tidytext::reorder_within(x = .data[["terms"]], 
+                                     by = abs(.data[["value"]]), 
+                                     within = .data[["component"]])
+    ) %>%
+  ggplot2::ggplot(mapping = ggplot2::aes(x = abs(.data[["value"]]), 
+                                         y = .data[["terms"]], 
+                                         fill = .data[["value"]] > 0)
+                  ) +
+  ggplot2::geom_col() +
+  ggplot2::facet_wrap(facets = ggplot2::vars(.data[["component"]]), 
+                      scales = "free_y") +
+  tidytext::scale_y_reordered() +
+  ggplot2::labs(
+    x = "Absolute value of contribution to PCA component",
+    y = NULL, 
+    fill = "Positive?"
+  )
+
+```
+
+How much variation are we capturing for each component?
+
+Here is how we can see the variance statistics but it is in a long form
+
+```{r}
+#| message: false
+#| 
+tidied_pca_variance <- pca_estimates %>%
+  parsnip::tidy(id = "pca", type = "variance")
+
+tidied_pca_variance %>% 
+  reactable::reactable(defaultPageSize = 5)
+```
+
+Here is how we can see the variance statistics in its wide form
+
+```{r}
+#| message: false
+#| 
+tidied_pca_variance %>% 
+  tidyr::pivot_wider(names_from = .data[["component"]], 
+                     values_from = .data[["value"]], 
+                     names_prefix = "PC") %>% 
+  dplyr::select(-dplyr::all_of("id")) %>% 
+  reactable::reactable(defaultPageSize = 5)
+```
+
+Here is a simple plot to show the variance captured for each component
+
+```{r}
+#| message: false
+#| 
+# Get the variance
+percent_variation <- tidied_pca_variance %>%
+  dplyr::filter(.data[["terms"]] == "percent variance") %>% 
+  dplyr::pull(.data[["value"]])
+
+percent_variation <- percent_variation/100
+
+# I use [1:4] to select the first four components
+dplyr::tibble(component = unique(tidied_pca_loadings$component)[1:4], 
+              percent_var = percent_variation[1:4]) %>%
+  dplyr::mutate(component = forcats::fct_inorder(.data[["component"]])) %>%
+  ggplot2::ggplot(mapping = ggplot2::aes(x = .data[["component"]], 
+                                         y = .data[["percent_var"]])) +
+  ggplot2::geom_col() +
+  ggplot2::geom_text(
+    mapping = ggplot2::aes(
+      label = paste(round(.data[["percent_var"]] * 100,0),"%")),
+      vjust = -0.2) +
+  ggplot2::scale_y_continuous(labels = scales::percent_format()) +
+  ggplot2::theme(axis.title.y = ggplot2::element_text(angle = 0)) +
+  ggplot2::labs(x = NULL, 
+                y = "Percent variance \nexplained by each \nPCA component")
+
+```
+
+Here is a PCA Biplot of PC1 and PC2
+
+```{r}
+#| message: false
+
+filtered_loadings <- tidied_pca_loadings %>%
+  tidyr::pivot_wider(names_from = .data[["component"]], 
+                     values_from = .data[["value"]])
+
+ggplot2::ggplot() +
+  ggplot2::geom_point(data = pca_score,
+                      mapping = ggplot2::aes(x = .data[["PC1"]], 
+                                             y = .data[["PC2"]]),
+                                             size = 2, 
+                      alpha = 0.6) +
+  ggplot2::geom_text(data = pca_score,
+                     mapping = ggplot2::aes(x = .data[["PC1"]],
+                                            y = .data[["PC2"]],
+                                            label = .data[["state"]]),
+                     check_overlap = TRUE,
+                     size = 2.5,
+                     hjust = "inward") +
+  ggplot2::geom_segment(data = filtered_loadings,
+                        mapping = ggplot2::aes(x = 0, 
+                                               y = 0,
+                                               xend = .data[["PC1"]] * 2.5,
+                                               yend = .data[["PC2"]] * 2.5
+                                               ),
+                        arrow = ggplot2::arrow(length = grid::unit(x = 0.5,
+                                                                   units = "picas")),
+                        color = "blue"
+                        ) +
+  ggplot2::annotate(geom = "text",
+                    x = filtered_loadings[["PC1"]] * 2.7,
+                    y = filtered_loadings[["PC2"]] * 2.7,
+                    label = filtered_loadings[["terms"]]) +
+  ggplot2::coord_fixed(clip = "off") +
+  ggplot2::theme_minimal()
+
+```
+
+# Matrix Completion
+
+## Initialisation
+
+```{r}
+#| message: false
+
+missing_data <- data.frame(
+  SBP = c(-3, NA, -1, 1, 1, NA),
+  DBP = c(NA, -2, 0, NA, 2, 4)
+)
+
+colour_missing_cells <- function(value, index, name) {
+   missing_indices <- which(is.na(missing_data[[name]]))
+   if (index %in% missing_indices) {
+     list(background = "#aaf0f8")
+   }
+ }
+
+xbar <- colMeans(missing_data , na.rm = TRUE)
+
+initialisation_data <- data.frame(
+  SBP = c(-3, -0.5, -1, 1, 1, -0.5),
+  DBP = c(1, -2, 0, 1, 2, 4)
+)
+
+thresh <- 1e-2
+ismiss <- is.na(missing_data)
+
+
+```
+
+## Functions
+
+These are the implementations for calculating step 2a and 2b for Algorithm 12.1
+
+::: {.panel-tabset}
+
+### BaseR PCA
+
+```{r}
+#| message: false
+
+fit_pca <- function(input_data, num_comp = 1) {
+  data_pca <- prcomp(input_data, center = FALSE)
+  
+  pca_loadings <- data_pca$rotation
+  pca_loadings_inverse <- solve(pca_loadings)[1:num_comp,, drop = FALSE]
+  pca_scores <- data_pca$x[,1:num_comp, drop = FALSE]
+  
+  estimated_data <- pca_scores %*% pca_loadings_inverse
+  return(estimated_data)
+
+}
+
+```
+
+### BaseR SVD
+
+```{r}
+#| message: false
+
+fit_svd <- function(input_data, num_comp = 1) {
+  svd_object <-svd(input_data)
+  
+  pca_loadings <- svd_object$v[, 1:num_comp, drop = FALSE]
+  pca_loadings_inverse <- t(pca_loadings)
+  
+  pca_scores <- (svd_object$u %*% diag(svd_object$d))[, 1:num_comp, drop = FALSE]
+  
+  estimated_data <- pca_scores %*% pca_loadings_inverse
+  
+  return(estimated_data)
+
+}
+
+```
+
+### Tidymodels
+
+```{r}
+#| message: false
+
+fit_pca_tidy <- function(input_data, num_comp = 1) {
+  
+  pca_recipe <- recipes::recipe(formula = ~.,
+                                data = input_data) %>%
+    recipes::step_pca(recipes::all_numeric_predictors(),
+                      id = "pca")
+  
+  
+  pca_estimates <- recipes::prep(x = pca_recipe, training = input_data)
+  
+  pca_scores <- pca_estimates %>%
+    recipes::bake(new_data = input_data) %>%
+    as.matrix()
+  pca_scores <- pca_scores[,1:num_comp,drop = FALSE]
+  
+  
+  pca_loadings <- pca_estimates %>%
+    parsnip::tidy(id = "pca", type = "coef") %>%
+    tidyr::pivot_wider(names_from = .data[["component"]],
+                       values_from = .data[["value"]]) %>%
+    dplyr::select(-c("terms","id")) %>%
+    as.matrix()
+  
+  pca_loadings_inverse <- solve(pca_loadings)[1:num_comp,,drop = FALSE]
+  
+  estimated_data <- pca_scores %*% pca_loadings_inverse
+  
+  return(estimated_data)
+  
+}
+
+```
+
+:::
+
+## Iteration 1
+
+::: {.panel-tabset}
+
+### BaseR PCA
+
+```{r}
+#| message: false
+
+initialisation_data_pca <- initialisation_data
+
+# Step 2(a)
+Xapp <- fit_pca(initialisation_data_pca , num_comp = 1)
+
+# Step 2(b)
+initialisation_data_pca[ismiss] <- Xapp[ismiss]
+
+# Step 2(c)
+mss_old_pca <- mean(((missing_data - Xapp)[!ismiss])^2)
+
+initialisation_data_pca %>%   
+  reactable::reactable(defaultPageSize = 6)
+
+mss_old_pca
+```
+
+### BaseR SVD
+
+```{r}
+#| message: false
+
+initialisation_data_svd <- initialisation_data
+
+# Step 2(a)
+Xapp <- fit_svd(initialisation_data_svd , num_comp = 1)
+
+# Step 2(b)
+initialisation_data_svd[ismiss] <- Xapp[ismiss]
+
+# Step 2(c)
+mss_old_svd <- mean(((missing_data - Xapp)[!ismiss])^2)
+
+initialisation_data_svd %>%   
+  reactable::reactable(defaultPageSize = 6)
+
+mss_old_svd
+```
+
+### Tidymodels
+
+```{r}
+#| message: false
+
+initialisation_data_tidymodels <- initialisation_data
+
+# Step 2(a)
+Xapp <- fit_pca_tidy(initialisation_data_tidymodels , num_comp = 1)
+
+# Step 2(b)
+initialisation_data_tidymodels[ismiss] <- Xapp[ismiss]
+
+# Step 2(c)
+mss_old_tidymodels <- mean(((missing_data - Xapp)[!ismiss])^2)
+
+initialisation_data_tidymodels %>%   
+  reactable::reactable(defaultPageSize = 6,
+    columns = list(
+      SBP = reactable::colDef(format = reactable::colFormat(digits = 2)),
+      DBP = reactable::colDef(format = reactable::colFormat(digits = 2))
+    ),
+    defaultColDef = reactable::colDef(
+      style = colour_missing_cells
+    ))
+
+mss_old_tidymodels
+```
+
+:::
+
+## The rest of the iteration
+
+::: {.panel-tabset}
+
+### BaseR PCA
+
+```{r, max.height = '500px'}
+#| message: false
+
+iter <- 1
+rel_err <- mss_old_pca
+thresh <- 1e-2
+while(rel_err > thresh) {
+  iter <- iter + 1
+  
+  # Step 2(a)
+  Xapp <- fit_pca(initialisation_data_pca , num_comp = 1)
+  
+  # Step 2(b)
+  initialisation_data_pca[ismiss] <- Xapp[ismiss]
+  
+  # Step 2(c)
+  mss_pca <- mean(((missing_data - Xapp)[!ismiss])^2)
+  rel_err <- mss_old_pca - mss_pca
+  mss_old_pca <- mss_pca
+  cat("Iter:", iter, "\n", 
+      "MSS:", mss_pca, "\n",
+      "Rel. Err:", rel_err, "\n")
+  print("Xapp")
+  print(Xapp)
+  print("Data")
+  print(initialisation_data_pca)
+}
+
+```
+
+### Tidymodels
+
+```{r, max.height = '500px'}
+#| message: false
+
+iter <- 1
+rel_err <- mss_old_svd
+thresh <- 1e-2
+while(rel_err > thresh) {
+  iter <- iter + 1
+  
+  # Step 2(a)
+  Xapp <- fit_svd(initialisation_data_svd, num_comp = 1)
+  
+  # Step 2(b)
+  initialisation_data_svd[ismiss] <- Xapp[ismiss]
+  
+  # Step 2(c)
+  mss_svd <- mean(((missing_data - Xapp)[!ismiss])^2)
+  rel_err <- mss_old_svd - mss_svd
+  mss_old_svd <- mss_svd
+  cat("Iter:", iter, "\n", 
+      "MSS:", mss_svd, "\n",
+      "Rel. Err:", rel_err, "\n")
+  print("Xapp")
+  print(Xapp)
+  print("Data")
+  print(initialisation_data_svd)
+}
+
+```
+
+### BaseR SVD
+
+```{r, max.height = '500px'}
+#| message: false
+
+iter <- 1
+rel_err <- mss_old_tidymodels 
+thresh <- 1e-2
+while(rel_err > thresh) {
+  iter <- iter + 1
+  
+  # Step 2(a)
+  Xapp <- fit_svd(initialisation_data_tidymodels , num_comp = 1)
+  
+  # Step 2(b)
+  initialisation_data_tidymodels [ismiss] <- Xapp[ismiss]
+  
+  # Step 2(c)
+  mss_tidymodels  <- mean(((missing_data - Xapp)[!ismiss])^2)
+  rel_err <- mss_old_tidymodels  - mss_tidymodels 
+  mss_old_tidymodels  <- mss_tidymodels 
+  cat("Iter:", iter, "\n", 
+      "MSS:", mss_tidymodels , "\n",
+      "Rel. Err:", rel_err, "\n")
+  print("Xapp")
+  print(Xapp)
+  print("Data")
+  print(initialisation_data_tidymodels)
+}
+
+```
+
+:::
+
+## SoftImpute
+
+```{r}
+#| message: false
+#| warning: false
+#| layout: [[1], [1]]
+
+initialisation_data_tidymodels %>% 
+  reactable::reactable(
+    defaultPageSize = 6,
+    columns = list(
+      SBP = reactable::colDef(format = reactable::colFormat(digits = 2)),
+      DBP = reactable::colDef(format = reactable::colFormat(digits = 2))
+    ),
+    defaultColDef = reactable::colDef(
+      style = colour_missing_cells
+    )) %>%
+  reactablefmtr::add_title(
+    title = "Algorithm 12.1"
+    )
+
+
+fits <- softImpute::softImpute(missing_data, type = "svd")
+softImpute::complete(missing_data, fits) %>% 
+  reactable::reactable(
+    defaultPageSize = 6,
+    columns = list(
+      SBP = reactable::colDef(format = reactable::colFormat(digits = 2)),
+      DBP = reactable::colDef(format = reactable::colFormat(digits = 2))
+    ),
+    defaultColDef = reactable::colDef(
+      style = colour_missing_cells
+    )) %>%
+  reactablefmtr::add_title(
+    title = "Soft Impute"
+    )
+```
+
+# K-Means Clustering
+
+## Introduction
+
+We begin with a simple simulated example in which there truly are two clusters in the
+
+```{r}
+#| message: false
+
+set.seed(2)
+
+# CLuster centre at (0,0) and (3,-4)
+centers <- tibble(
+  cluster = factor(1:2), 
+  num_points = c(25, 25),    # number points in each cluster
+  V1 = c(0, 3),              # V1 coordinate of cluster center
+  V2 = c(0, -4)              # V2 coordinate of cluster center
+)
+
+labelled_points <- centers %>%
+  dplyr::mutate(
+    V1 = purrr::map2(.data[["num_points"]], .data[["V1"]], rnorm),
+    V2 = purrr::map2(.data[["num_points"]], .data[["V2"]], rnorm)
+  ) %>% 
+  dplyr::select(-c("num_points")) %>% 
+  tidyr::unnest(cols = c("V1", "V2"))
+
+labelled_points %>% 
+  reactable::reactable(
+    defaultPageSize = 10,
+    columns = list(
+      V1 = reactable::colDef(format = reactable::colFormat(digits = 2)),
+      V2 = reactable::colDef(format = reactable::colFormat(digits = 2))
+    )
+  )
+
+ggplot2::ggplot(data = labelled_points, 
+                mapping = ggplot2::aes(x = .data[["V1"]], 
+                                       y = .data[["V2"]], 
+                                       color = .data[["cluster"]])
+                ) +
+  ggplot2::geom_point(alpha = 1)
+
+
+```
+
+We now perform K-means clustering with $K = 2$.
+
+We’ll use the built-in [`stats::kmeans`](https://stat.ethz.ch/R-manual/R-devel/library/stats/html/kmeans.html) function, which accepts a data frame with all numeric columns as it’s primary argument
+
+```{r, max.height = '300px'}
+#| message: false
+points <- labelled_points %>% 
+  dplyr::select(-c("cluster"))
+
+result_kmeans <- stats::kmeans(x = points, 
+                        centers = 2, 
+                        nstart = 20)
+
+result_kmeans
+```
+
+The [`broom::tidy`](https://broom.tidymodels.org/) function returns information for each cluster, including their mean position (centroid), size and within-cluster sum-of-squares.
+
+```{r}
+#| message: false
+
+result_kmeans %>% 
+  broom::tidy() %>% 
+  reactable::reactable()
+
+```
+
+The [`broom::glance`](https://broom.tidymodels.org/) function returns model wise metrics. One of these is `tot.withinss` which is the **total** within-cluster sum-of-squares that we seek to minimize when we perform K-means clustering.
+
+```{r}
+#| message: false
+
+result_kmeans %>% 
+  broom::glance() %>% 
+  reactable::reactable()
+
+```
+
+We can see what cluster each observation belongs to by using [`broom::augment`](https://broom.tidymodels.org/) which “predict” which cluster a given observation belongs to.
+
+```{r}
+#| message: false
+
+predicted_kmeans <- result_kmeans %>% 
+  broom::augment(data = points)
+
+predicted_kmeans %>%
+  reactable::reactable(defaultPageSize = 5)
+
+```
+
+```{r}
+#| message: false
+
+ggplot2::ggplot(data = predicted_kmeans, 
+                mapping = ggplot2::aes(x = .data[["V1"]], 
+                                       y = .data[["V2"]], 
+                                       color = .data[[".cluster"]])
+                ) +
+  ggplot2::geom_point(alpha = 1)
+
+```
+
+## Exploration
+
+In reality, we will not know how many clusters is required for a given dataset. We need to try out a number of different values of $K$ and then find the best one.
+
+Let us try $K$ from 1 to 9.
+
+```{r, max.height = '300px'}
+#| message: false
+
+kclusts <- tibble::tibble(k = 1:9) %>%
+  dplyr::mutate(
+    kclust = purrr::map(.x = .data[["k"]], 
+                        .f = ~kmeans(x = points, centers = .x))) %>%
+  dplyr::mutate(
+    tidied = purrr::map(.x = .data[["kclust"]], 
+                        .f = broom::tidy),
+    glanced = purrr::map(.x = .data[["kclust"]], 
+                         .f = broom::glance),
+    augmented = purrr::map(.x = .data[["kclust"]], 
+                           .f = broom::augment, data = points)
+  )
+
+kclusts
+```
+
+Let `assignments` be a dataset of which cluster each points goes to for $K$ from 1 to 9
+
+```{r}
+#| message: false
+
+assignments <- kclusts %>% 
+  dplyr::select(c("k", "augmented")) %>%
+  tidyr::unnest(cols = c("augmented"))
+
+assignments %>%
+  reactable::reactable(defaultPageSize = 5)
+```
+
+Now we can plot the original points using the data from assignments, with each point coloured according to the predicted cluster.
+
+```{r, fig.height = 8}
+
+ggplot2::ggplot(data = assignments, 
+                      mapping = ggplot2::aes(x = .data[["V1"]], 
+                                             y = .data[["V2"]])) +
+  geom_point(mapping = ggplot2::aes(color = .data[[".cluster"]]), 
+             alpha = 0.8) + 
+  facet_wrap(ggplot2::vars(.data[["k"]]))
+
+```
+
+Let `clusters` be a dataset of cluster mean position (centroids) for $K$ from 1 to 9
+
+```{r}
+#| message: false
+
+clusters <- kclusts %>%
+  dplyr::select(c("k", "tidied")) %>%
+  tidyr::unnest(cols = c("tidied"))
+
+clusters %>%
+  reactable::reactable(defaultPageSize = 5)
+
+```
+
+We can then add the centers of the cluster using the data from `clusters`
+
+```{r, fig.height = 8}
+
+ggplot2::ggplot(data = assignments, 
+                      mapping = ggplot2::aes(x = .data[["V1"]], 
+                                             y = .data[["V2"]])) +
+  geom_point(mapping = ggplot2::aes(color = .data[[".cluster"]]), 
+             alpha = 0.8) + 
+  facet_wrap(ggplot2::vars(.data[["k"]])) +
+  geom_point(data = clusters, 
+             size = 10, 
+             shape = "x")
+
+```
+
+Let `clusterings` be a dataset of cluster metrics for $K$ from 1 to 9
+
+```{r}
+#| message: false
+
+clusterings <- kclusts %>%
+  dplyr::select(c("k", "glanced")) %>%
+  tidyr::unnest(cols = c("glanced"))
+
+clusterings %>%
+  reactable::reactable(defaultPageSize = 5)
+
+```
+
+Now that we have the total within-cluster sum-of-squares for $K$ from 1 to 9, we can plot them against k so we can use the elbow method to find the optimal number of clusters.
+
+```{r}
+#| message: false
+
+ggplot2::ggplot(data = clusterings, 
+                mapping = ggplot2::aes(x = .data[["k"]], 
+                                       y = .data[["tot.withinss"]])) +
+  ggplot2::geom_line(alpha = 0.5, size = 1.2, color = "midnightblue") +
+  ggplot2::geom_point(size = 2, color = "midnightblue")
+
+
+```
+
+We see an elbow at k = 2 which makes us happy since the data set is specifically created to have 2 clusters. We can now extract the model where k = 2 from
+
+```{r, max.height = '300px'}
+#| message: false
+
+final_kclusts <- kclusts %>%
+  dplyr::filter(.data[["k"]] == 2) %>%
+  dplyr::pull(.data[["kclust"]]) %>%
+  purrr::pluck(1)
+
+```
+
+# Hierarchical Clustering
+
+The [`stats::dist`](https://stat.ethz.ch/R-manual/R-devel/library/stats/html/dist.html) function is used to calculate the Euclidean distance dissimilarity measure.
+
+```{r}
+#| message: false
+
+dissimilarity_measure <- points %>%
+  stats::dist(method = "euclidean") 
+
+dissimilarity_measure %>%
+  as.matrix() %>% 
+  reactable::reactable()
+```
+
+The [`stats::hclust`](https://stat.ethz.ch/R-manual/R-devel/library/stats/html/hclust.html) function implements hierarchical clustering in R. We use the data used for K-means clustering to plot the hierarchical clustering dendrogram using complete, single, and average linkage clustering, with Euclidean distance as the dissimilarity measure. 
+
+```{r}
+#| message: false
+
+res_hclust_complete <- dissimilarity_measure %>%
+  stats::hclust(method = "complete")
+
+res_hclust_average <- dissimilarity_measure %>%
+  stats::hclust(method = "average")
+
+res_hclust_single <- dissimilarity_measure %>%
+  stats::hclust(method = "single")
+
+```
+
+We use [`factoextra::fviz_dend`](https://rpkgs.datanovia.com/factoextra/reference/fviz_dend.html) to visualize the clustering created using `hclust`.
+
+To determine the cluster labels for each observation associated with a given cut of the dendrogram, we can use the [`stats::cutree`](https://stat.ethz.ch/R-manual/R-devel/library/stats/html/cutree.html) function
+
+::: {.panel-tabset}
+
+### Complete
+
+```{r}
+#| message: false
+#| warning: false
+
+factoextra::fviz_dend(res_hclust_complete, main = "complete", k = 2)
+
+stats::cutree(tree = res_hclust_complete, k = 2)
+
+results_hclust <- 
+  tibble::tibble(
+    cluster_id = stats::cutree(tree = res_hclust_complete, k = 2)
+  ) %>% 
+  dplyr::bind_cols(points) %>%
+  dplyr::mutate(cluster_id = as.factor(.data$cluster_id))
+
+results_hclust %>%
+  reactable::reactable(defaultPageSize = 5)
+```
+
+### Average
+
+```{r}
+#| message: false
+#| warning: false
+
+factoextra::fviz_dend(res_hclust_average, main = "average", k = 2)
+
+cutree(tree = res_hclust_average, k = 2)
+
+results_hclust <- 
+  tibble::tibble(
+    cluster_id = stats::cutree(tree = res_hclust_average, k = 2)
+  ) %>% 
+  dplyr::bind_cols(points) %>%
+  dplyr::mutate(cluster_id = as.factor(.data$cluster_id))
+
+results_hclust %>%
+  reactable::reactable(defaultPageSize = 5)
+
+```
+
+### Single
+
+```{r}
+#| message: false
+#| warning: false
+
+factoextra::fviz_dend(res_hclust_single, main = "single", k = 4)
+
+cutree(tree = res_hclust_single, k = 4)
+
+results_hclust <- 
+  tibble::tibble(
+    cluster_id = stats::cutree(tree = res_hclust_single, k = 2)
+  ) %>% 
+  dplyr::bind_cols(points) %>%
+  dplyr::mutate(cluster_id = as.factor(.data$cluster_id))
+
+results_hclust %>%
+  reactable::reactable(defaultPageSize = 5)
+
+```
+
+:::
+
+We analyze the nature of the clusters mathematically by evaluating the c, which measures the clustering structure of the dataset - with values closer to 1 suggest a more balanced clustering structure and values closer to 0 suggest less well-formed clusters. However, the agglomerative coefficient tends to become larger as the number of samples increases, so it should not be used to compare across data sets of very different sizes.
+
+[`cluster::agnes`](https://stat.ethz.ch/R-manual/R-devel/library/cluster/html/agnes.html) allows us to compute this metric on the results from hierarchical clustering.
+
+It looks like the complete linkage did the best.
+
+```{r}
+#| message: false
+
+# Compute agglomerative coefficient values
+
+ac_metric <- list(
+  complete_ac = cluster::agnes(x = dissimilarity_measure, 
+                               metric = "euclidean", 
+                               method = "complete")$ac,
+  average_ac = cluster::agnes(x = dissimilarity_measure,
+                              metric = "euclidean",
+                              method = "average")$ac,
+  single_ac = cluster::agnes(x = dissimilarity_measure,
+                             metric = "euclidean",
+                             method = "single")$ac
+)
+
+ac_metric
+```
+
+Although hierarchical clustering provides a fully connected dendrogram representing the cluster relationships, there may still need to choose the preferred number of clusters to extract. Fortunately we can execute approaches similar to those discussed for k-means clustering with [`factoextra::fviz_nbclust`](https://rpkgs.datanovia.com/factoextra/reference/fviz_nbclust.html)
+
+```{r, fig.height = 8}
+#| message: false
+#| warning: false
+
+# Plot cluster results
+p1 <- factoextra::fviz_nbclust(x = points, 
+                               FUN = factoextra::hcut,
+                               method = "wss",
+                               k.max = 10) +
+  ggplot2::ggtitle(label = "(A) Elbow method")
+
+p2 <- factoextra::fviz_nbclust(x = points, 
+                   FUN = factoextra::hcut, 
+                   method = "silhouette", 
+                   k.max = 10) +
+  ggplot2::ggtitle("(B) Silhouette method")
+
+p3 <- factoextra::fviz_nbclust(x = points, 
+                   FUN = factoextra::hcut, 
+                   method = "gap_stat", 
+                   k.max = 10) +
+  ggplot2::ggtitle("(C) Gap statistic")
+
+# Display plots side by side
+gridExtra::grid.arrange(p1, p2, p3, ncol = 1)
+
+```
+
+Another way of calculating distances is based on pearson correlation using [proxy::dist]. However, this only makes sense if we have data with 3 or more variables.
+
+```{r}
+#| message: false
+#| warning: false
+
+# correlation based distance
+set.seed(2)
+three_var_data <- matrix(rnorm(30 * 3), ncol = 3)
+
+three_var_data %>%
+  proxy::dist(method = "correlation") %>%
+  stats::hclust(method = "complete") %>%
+  factoextra::fviz_dend(main = "complete", k = 2)
+
+```
+
+```{r, fig.height = 8}
+#| message: false
+
+# Plot cluster results
+p1 <- factoextra::fviz_nbclust(x = three_var_data, 
+                               FUN = factoextra::hcut,
+                               method = "wss",
+                               hc_metric = "pearson",
+                               k.max = 10) +
+  ggplot2::ggtitle(label = "(A) Elbow method")
+
+p2 <- factoextra::fviz_nbclust(x = three_var_data, 
+                   FUN = factoextra::hcut, 
+                   method = "silhouette",
+                   hc_metric = "pearson",
+                   k.max = 10) +
+  ggplot2::ggtitle("(B) Silhouette method")
+
+p3 <- factoextra::fviz_nbclust(x = three_var_data, 
+                   FUN = factoextra::hcut, 
+                   method = "gap_stat",
+                   hc_metric = "pearson",
+                   k.max = 10) +
+  ggplot2::ggtitle("(C) Gap statistic")
+
+# Display plots side by side
+gridExtra::grid.arrange(p1, p2, p3, ncol = 1)
+
+```
+
+# NCI60 Data Example
+
+Unsupervised techniques are often used in the analysis of genomic data. 
+
+We illustrate these techniques on the [NCI60](https://rdrr.io/cran/ISLR2/man/NCI60.html) cancer cell line microarray data, which consists of 6,830 gene expression measurements on 64 cancer cell lines.
+
+`labels` represents the type of cancer. V_1 to V_6830 represent a gene. 
+
+```{r}
+#| message: false
+
+nci60 <- ISLR2::NCI60$data %>%
+  tibble::as_tibble() %>%
+  magrittr::set_colnames(., paste0("V_", 1:ncol(.))) %>%
+  dplyr::mutate(label = factor(ISLR2::NCI60$labs)) %>%
+  dplyr::relocate(.data[["label"]])
+
+# head(nci60) %>%
+#   reactable::reactable(defaultPageSize = 10)
+```
+
+## PCA on the NCI60 Data
+
+We first perform PCA on the data after scaling the variables (genes) to have standard deviation one and plot the first few principal component score vectors, in order to
+visualize the data.
+
+```{r}
+#| message: false
+
+nci60_preproc_rec <- recipes::recipe(formula = label ~ ., data = nci60) %>%
+  recipes::step_normalize(recipes::all_numeric_predictors()) %>%
+  recipes::step_pca(recipes::all_numeric_predictors(),
+                    id = "pca",
+                    threshold = 0.99)
+
+```
+
+
+```{r}
+#| message: false
+
+nci60_pca_estimates <- recipes::prep(x = nci60_preproc_rec)
+  
+nci60_pca_estimates %>%
+  summary() %>%
+  reactable::reactable(defaultPageSize = 5)
+
+```
+
+```{r}
+#| message: false
+
+nci60_pca_score <- nci60_pca_estimates %>%
+  recipes::bake(new_data = NULL)
+  
+  
+head(nci60_pca_score) %>%  
+  reactable::reactable(defaultPageSize = 5)
+
+```
+
+We visualise the projections of the NCI60 cancer cell lines onto the first three principal components
+
+```{r}
+#| message: false
+colors <- unname(palette.colors(n = 14, palette = "Polychrome 36"))
+
+nci60_pca_score %>%
+  dplyr::select(c("label", "PC01","PC02")) %>%
+  ggplot2::ggplot(mapping = ggplot2::aes(x = .data[["PC01"]],
+                                         y = .data[["PC02"]], 
+                                         color = .data[["label"]])) +
+  ggplot2::geom_point() +
+  ggplot2::scale_color_manual(values = colors) +
+  ggplot2::theme_bw()
+
+```
+
+```{r}
+#| message: false
+nci60_pca_score %>%
+  dplyr::select(c("label", "PC01","PC03")) %>%
+  ggplot2::ggplot(mapping = ggplot2::aes(x = .data[["PC01"]],
+                                         y = .data[["PC03"]], 
+                                         color = .data[["label"]])) +
+  ggplot2::geom_point() +
+  ggplot2::scale_color_manual(values = colors) +
+  ggplot2::theme_bw()
+
+```
+
+Here is a scatter plot matrix 
+
+```{r}
+#| message: false
+#| warning: false
+
+nci60_pca_score %>%
+  dplyr::select(c("label", "PC01","PC02","PC03")) %>%
+  ggplot2::ggplot(mapping = ggplot2::aes(x = .panel_x, 
+                                         y = .panel_y, 
+                                         color = .data[["label"]], 
+                                         fill = .data[["label"]])) +
+  ggplot2::geom_point(alpha = 0.4, size = 0.5) +
+  ggforce::geom_autodensity(alpha = .3) +
+  ggforce::facet_matrix(rows = ggplot2::vars(-c("label")), layer.diag = 2) + 
+  ggplot2::scale_color_manual(values = colors) + 
+  ggplot2::scale_fill_manual(values = colors) +
+  cowplot::theme_minimal_grid() +
+  cowplot::panel_border(color = "black") +
+  ggplot2::theme(legend.position = "bottom")
+
+```
+
+How much variation are we capturing for each component?
+
+We extract the pca loadings of the pca step.
+
+```{r}
+#| message: false
+
+nci60_pca_loadings <- nci60_pca_estimates %>%
+  parsnip::tidy(id = "pca", type = "coef")
+
+
+head(nci60_pca_loadings) %>%
+  reactable::reactable(defaultPageSize = 5)
+
+```
+
+Here is how we can see the variance statistics but it is in a long form
+
+```{r}
+#| message: false
+
+nci60_pca_variance <- nci60_pca_estimates %>%
+  parsnip::tidy(id = "pca", type = "variance")
+
+```
+
+Here is how we can see the variance statistics in its wide form
+
+```{r}
+#| message: false
+
+nci60_pca_variance %>% 
+  tidyr::pivot_wider(names_from = .data[["component"]], 
+                     values_from = .data[["value"]], 
+                     names_prefix = "PC") %>% 
+  dplyr::select(-dplyr::all_of("id")) %>% 
+  reactable::reactable(defaultPageSize = 5)
+```
+
+Here is a simple plot to show the variance captured for each component.
+
+```{r}
+#| message: false
+
+# Get the variance
+percent_variation <- nci60_pca_variance %>%
+  dplyr::filter(.data[["terms"]] == "percent variance") %>% 
+  dplyr::pull(.data[["value"]])
+
+percent_variation <- percent_variation/100
+component = unique(nci60_pca_loadings$component) %>%
+  stringr::str_remove(pattern = "PC") %>%
+  as.integer()
+
+# I use [1:4] to select the first four components
+dplyr::tibble(component = component, 
+              percent_var = percent_variation) %>%
+  #dplyr::mutate(component = forcats::fct_inorder(.data[["component"]])) %>%
+  ggplot2::ggplot(mapping = ggplot2::aes(x = .data[["component"]], 
+                                         y = .data[["percent_var"]])) +
+  ggplot2::geom_point() +
+  ggplot2::geom_line() +
+  ggplot2::scale_y_continuous(labels = scales::percent_format()) +
+  ggplot2::theme(axis.title.y = ggplot2::element_text(angle = 0)) +
+  ggplot2::labs(x = NULL, 
+                y = "Percent variance \nexplained by each \nPCA component")
+
+```
+
+We see that together, the first seven principal components explain around 40% of the variance in the data.
+
+```{r}
+#| message: false
+
+# Get the variance
+cumulative_percent_variation <- nci60_pca_variance %>%
+  dplyr::filter(.data[["terms"]] == "cumulative percent variance") %>% 
+  dplyr::pull(.data[["value"]])
+
+cumulative_percent_variation <- cumulative_percent_variation/100
+component = unique(nci60_pca_loadings$component) %>%
+  stringr::str_remove(pattern = "PC") %>%
+  as.integer()
+
+# I use [1:4] to select the first four components
+dplyr::tibble(component = component, 
+              cumulative_percent_var = cumulative_percent_variation) %>%
+  #dplyr::mutate(component = forcats::fct_inorder(.data[["component"]])) %>%
+  ggplot2::ggplot(mapping = ggplot2::aes(x = .data[["component"]], 
+                                         y = .data[["cumulative_percent_var"]])) +
+  ggplot2::geom_point() +
+  ggplot2::geom_line() +
+  ggplot2::scale_y_continuous(labels = scales::percent_format()) +
+  ggplot2::theme(axis.title.y = ggplot2::element_text(angle = 0)) +
+  ggplot2::labs(x = NULL, 
+                y = "Cumulative percent \nvariance explained \nby each PCA \ncomponent")
+
+```
+
+## Clustering on NCI60 dataset
+
+We now proceed to hierarchically cluster the cell lines in the NCI60 data, with the goal of finding out whether or not the observations cluster into distinct types of cancer.
+
+We first preprocess the data suited for hierarchical clustering
+
+```{r}
+#| message: false
+
+nci60_scaled <- recipes::recipe(formula = label ~ ., data = nci60) %>%
+  recipes::step_normalize(recipes::all_numeric_predictors()) %>%
+  recipes::prep() %>%
+  recipes::bake(new_data = NULL)
+
+```
+
+We choose the preferred number of clusters to extract.
+
+```{r, fig.height = 8}
+#| message: false
+#| warning: false
+
+nci60_num_cluster <- nci60_scaled %>% 
+  dplyr::select(-c("label"))
+
+# Plot cluster results
+p1 <- factoextra::fviz_nbclust(x = nci60_num_cluster, 
+                               FUN = factoextra::hcut,
+                               method = "wss",
+                               hc_metric = "euclidean",
+                               k.max = 10) +
+  ggplot2::ggtitle(label = "(A) Elbow method")
+
+p2 <- factoextra::fviz_nbclust(x = nci60_num_cluster, 
+                   FUN = factoextra::hcut, 
+                   method = "silhouette",
+                   hc_metric = "euclidean",
+                   k.max = 10) +
+  ggplot2::ggtitle("(B) Silhouette method")
+
+p3 <- factoextra::fviz_nbclust(x = nci60_num_cluster, 
+                   FUN = factoextra::hcut, 
+                   method = "gap_stat", 
+                   hc_metric = "euclidean",
+                   k.max = 10) +
+  ggplot2::ggtitle("(C) Gap statistic")
+
+# Display plots side by side
+gridExtra::grid.arrange(p1, p2, p3, ncol = 1)
+
+```
+
+We now perform hierarchical clustering of the observations using complete, single, and average linkage. Euclidean distance is used as the dissimilarity measure.
+
+```{r}
+#| message: false
+#| warning: false
+
+nci60_complete <- nci60_num_cluster %>%
+    stats::dist(method = "euclidean") %>%
+    stats::hclust(method = "complete")
+
+nci60_average <- nci60_num_cluster %>%
+    stats::dist(method = "euclidean") %>%
+    stats::hclust(method = "average")
+
+nci60_single <- nci60_num_cluster %>%
+    stats::dist(method = "euclidean") %>%
+    stats::hclust(method = "single")
+
+```
+
+We then visualize them to see if any of them have some good natural separations.
+
+Typically, single linkage will tend to yield trailing clusters: very large clusters onto which individual observations.
+
+Complete and average linkage tend to yield more balanced, attractive clusters. For this reason, complete and average linkage are generally preferred to single linkage.
+
+::: {.panel-tabset}
+
+### Complete
+
+```{r}
+#| message: false
+#| warning: false
+
+
+nci60_complete$labels <- nci60_scaled$label
+factoextra::fviz_dend(nci60_complete, main = "complete", k = 4)
+
+stats::cutree(tree = nci60_complete, k = 4)
+
+```
+
+### Average
+
+```{r}
+#| message: false
+#| warning: false
+
+nci60_average$labels <- nci60_scaled$label
+factoextra::fviz_dend(nci60_average, main = "average", k = 4)
+
+stats::cutree(tree = nci60_average, k = 4)
+
+```
+
+### Single
+
+```{r}
+#| message: false
+#| warning: false
+
+nci60_single$labels <- nci60_scaled$label
+factoextra::fviz_dend(nci60_single, main = "single", k = 4)
+
+stats::cutree(tree = nci60_single, k = 4)
+
+```
+
+:::
+
+We will use complete linkage hierarchical clustering for the analysis that follows.
+We calculate which Label is the most common within each cluster.
+
+```{r}
+#| message: false
+#| warning: false
+
+tibble::tibble(
+  label = nci60$label,
+  cluster_id = stats::cutree(nci60_complete, k = 4)
+) %>%
+  dplyr::count(.data[["label"]], .data[["cluster_id"]]) %>%
+  dplyr::group_by(.data[["cluster_id"]]) %>%
+  dplyr::mutate(total = sum(.data[["n"]]),
+                prop = .data[["n"]] / sum(.data[["n"]])) %>%
+  dplyr::slice_max(n = 1, order_by = .data[["prop"]]) %>%
+  dplyr::ungroup() %>%
+  reactable::reactable()
+
+```
+
+How do these NCI60 hierarchical clustering results compare to what we get if we perform K-means clustering with K = 4?
+
+```{r}
+#| message: false
+
+nci60_kmeans_results <- kmeans(nci60_num_cluster, centers = 4, nstart = 50)
+
+```
+
+```{r}
+#| message: false
+
+nci60_kmeans_results %>% 
+  broom::tidy() %>%
+  dplyr::select(cluster, size, withinss) %>%
+  reactable::reactable()
+
+```
+
+```{r}
+#| message: false
+
+cluster_kmeans <- nci60_kmeans_results$cluster
+cluster_hclust <- cutree(nci60_complete, k = 4)
+
+tibble(
+  kmeans = factor(cluster_kmeans),
+  hclust = factor(cluster_hclust)
+) %>%
+  yardstick::conf_mat(truth = kmeans, estimate = hclust) %>%
+  parsnip::autoplot(type = "heatmap")
+```
+
+# Blog References
+
+-   Tengku Hanis's [blog](https://tengkuhanis.netlify.app/post/explore-data-using-pca/) titled "Explore data using PCA"
+
+-   Julia Silge's
+    [blog](https://juliasilge.com/blog/cocktail-recipes-umap/) titled
+    "PCA and UMAP with tidymodels and #TidyTuesday cocktail recipes"
+    
+-   Julia Silge's [blog](https://juliasilge.com/blog/kmeans-employment/) titled "Getting started with k-means and #TidyTuesday employment status"
+
+-   Tidymodels' [tutorial](https://www.tidymodels.org/learn/statistics/k-means/) titled "K-means clustering with tidy data principles"
+    
+-   Emil Hvitfeldt's ISLR tidymodels Labs [Chapter 12](https://emilhvitfeldt.github.io/ISLR-tidymodels-labs/unsupervised-learning.html)
+
+-   [Eric (R_ic)](https://twitter.com/ericntay) RPubs's [post](https://rpubs.com/eR_ic/clustering) titled "Train and Evaluate Clustering Models using Tidymodels and friends"
+
+-   [Chapter 21](https://bradleyboehmke.github.io/HOML/hierarchical.html) Hierarchical Clustering from Hands-On Machine Learning with R
