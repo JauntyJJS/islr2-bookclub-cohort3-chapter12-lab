@@ -55,7 +55,6 @@ library(rmarkdown, quietly=TRUE)
 library(knitr, quietly=TRUE)
 library(htmltools, quietly=TRUE)
 library(styler, quietly=TRUE)
-library(xaringanExtra, quietly=TRUE)
 
 # Dataset
 library(ISLR2, quietly=TRUE)
@@ -76,6 +75,7 @@ library(softImpute, quietly=TRUE)
 
 # Create interactive tables
 library(reactable, quietly=TRUE)
+library(reactablefmtr, quietly=TRUE)
 
 # For plotting
 library(tidytext, quietly=TRUE)
@@ -1502,18 +1502,57 @@ nci60_kmeans_results %>%
 
 ```
 
+We see that the four clusters obtained using hierarchical clustering and Kmeans clustering are somewhat different.
+
 ```{r}
 #| message: false
 
 cluster_kmeans <- nci60_kmeans_results$cluster
 cluster_hclust <- cutree(nci60_complete, k = 4)
 
+table(cluster_hclust, cluster_kmeans)
+
 tibble(
   kmeans = factor(cluster_kmeans),
   hclust = factor(cluster_hclust)
 ) %>%
-  yardstick::conf_mat(truth = kmeans, estimate = hclust) %>%
+  yardstick::conf_mat(truth = kmeans, 
+                      estimate = hclust,
+                      dnn = c("Hierarchical clustering", "K-means")) %>%
   parsnip::autoplot(type = "heatmap")
+```
+
+Cluster 2 in K-means clustering is identical to cluster 4 in hierarchical clustering. However, the other clusters defer. For the twenty seven samples in K-means Cluster 3, twenty goes to hierarchical clustering Cluster 1 and seven goes to hierarchical clustering Cluster 2.
+
+Rather than performing hierarchical clustering on the entire data matrix, we can also perform hierarchical clustering on the first few principal component score vectors, as follows:
+
+```{r}
+#| message: false
+
+# nci60_scaled <- recipes::recipe(formula = label ~ ., data = nci60) %>%
+#   recipes::step_normalize(recipes::all_numeric_predictors()) %>%
+#   recipes::prep() %>%
+#   recipes::bake(new_data = NULL)
+
+nci60_pca <- recipes::recipe(~., nci60_scaled) %>%
+  step_pca(recipes::all_numeric_predictors(), num_comp = 5) %>%
+  recipes::prep() %>%
+  recipes::bake(new_data = NULL)
+```
+
+```{r}
+#| message: false
+#| warning: false
+
+nci60_pca_complete <- nci60_pca %>%
+    stats::dist(method = "euclidean") %>%
+    stats::hclust(method = "complete")
+
+nci60_pca_complete$labels <- nci60_pca$label
+factoextra::fviz_dend(nci60_pca_complete, main = "complete", k = 4)
+
+stats::cutree(tree = nci60_pca_complete, k = 4)
+
 ```
 
 # Blog References
@@ -1533,3 +1572,38 @@ tibble(
 -   [Eric (R_ic)](https://twitter.com/ericntay) RPubs's [post](https://rpubs.com/eR_ic/clustering) titled "Train and Evaluate Clustering Models using Tidymodels and friends"
 
 -   [Chapter 21](https://bradleyboehmke.github.io/HOML/hierarchical.html) Hierarchical Clustering from Hands-On Machine Learning with R
+
+# Package References
+
+```{r results='asis'}
+#| message: true
+#| warning: false
+
+
+get_citation <- function(package_name) {
+  transform_name <- package_name %>% 
+    citation() %>% 
+    format(style="text")
+  return(transform_name[1])
+} 
+
+packages <- c("base", "ggplot2", "rmarkdown", "cluster",
+              "report", "tidytext", "knitr", "broom",
+              "cowplot", "dplyr", "factoextra", "forcats",
+              "ggforce", "gridExtra", "htmltools", "ISLR2",
+              "magrittr", "Matrix", "parsnip", "proxy",
+              "purrr", "reactable", "reactablefmtr", "recipes",
+              "scales", "softImpute", "stringr", "styler",
+              "tibble", "tidyr", "yardstick")
+
+table <- tibble::tibble(Packages = packages)
+
+table %>%
+  dplyr::mutate(
+    transform_name = purrr::map_chr(.data[["Packages"]],
+                                    get_citation)
+  ) %>% 
+  dplyr::pull(.data[["transform_name"]]) %>% 
+  report::as.report_parameters()
+
+```
