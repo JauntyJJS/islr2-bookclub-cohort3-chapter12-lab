@@ -1708,6 +1708,17 @@ cbind(
   
 ```
 
+We notice that the three-cluster assignments from hier_clust do not line up perfectly with the five-cluster assignments from k_means.
+
+```{r}
+tibble(
+  hc = hc_preds$.pred_cluster,
+  km = km_preds$.pred_cluster
+) %>% 
+  dplyr::count(hc, km)
+```
+
+
 `tidyclust` also have a useful function called [`tidyclust::reconcile_clusterings`](https://emilhvitfeldt.github.io/tidyclust/reference/reconcile_clusterings.html) to match clusters from k-means with the clusters from hierarchical clustering.
 
 ```{r}
