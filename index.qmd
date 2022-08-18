@@ -12,7 +12,6 @@ knitr:
 format:
   html:
     theme: cerulean
-    highlight-style: pygments
     toc: true
     toc-depth: 3
     toc-location: left
@@ -98,6 +97,15 @@ library(yardstick, quietly=TRUE)
 library(proxy, quietly=TRUE)
 library(factoextra, quietly=TRUE)
 library(cluster, quietly=TRUE)
+
+# For tidy clustering
+library(workflows, quietly=TRUE)
+library(rsample, quietly=TRUE)
+library(tune, quietly=TRUE)
+library(dials, quietly=TRUE)
+library(tidyclust, quietly=TRUE)
+library(Rfast, quietly=TRUE)
+library(flexclust, quietly=TRUE)
 
 summary(report::report(sessionInfo()))
 ```
@@ -702,7 +710,7 @@ We begin with a simple simulated example in which there truly are two clusters i
 set.seed(2)
 
 # CLuster centre at (0,0) and (3,-4)
-centers <- tibble(
+centers <- tibble::tibble(
   cluster = factor(1:2), 
   num_points = c(25, 25),    # number points in each cluster
   V1 = c(0, 3),              # V1 coordinate of cluster center
@@ -799,7 +807,7 @@ ggplot2::ggplot(data = predicted_kmeans,
 
 ```
 
-## Exploration
+## Exploration Base R
 
 In reality, we will not know how many clusters is required for a given dataset. We need to try out a number of different values of $K$ and then find the best one.
 
@@ -1340,7 +1348,7 @@ dplyr::tibble(component = component,
 
 ```
 
-## Clustering on NCI60 dataset
+## Clustering on NCI60 dataset (Base R)
 
 We now proceed to hierarchically cluster the cell lines in the NCI60 data, with the goal of finding out whether or not the observations cluster into distinct types of cancer.
 
@@ -1555,6 +1563,170 @@ stats::cutree(tree = nci60_pca_complete, k = 4)
 
 ```
 
+## Clustering on NCI60 dataset (tidyclust)
+
+Recall that we scale the data before clustering and remove the labels.
+
+```{r}
+#| message: false
+
+nci60_scaled <- recipes::recipe(formula = label ~ ., data = nci60) %>%
+  recipes::step_normalize(recipes::all_numeric_predictors()) %>%
+  recipes::prep() %>%
+  recipes::bake(new_data = NULL)
+
+nci60_num_cluster <- nci60_scaled %>% 
+  dplyr::select(-c("label"))
+
+```
+
+[`tidyclust::hier_clust`](https://emilhvitfeldt.github.io/tidyclust/reference/hier_clust.html) is used to do the hierarchical clustering. Here, we set the number of clusters to four and use the complete linkage method. It actually uses [`stats::hclust()`](https://rdrr.io/r/stats/hclust.html) and Euclidean distance under the hood.
+
+```{r}
+
+hc_spec <- tidyclust::hier_clust(
+  num_clusters = 3,
+  linkage_method = "complete")
+
+hc_fit <- hc_spec %>%
+  tidyclust::fit(label ~ .,data = nci60_scaled)
+```
+
+We use [`tidyclust::within_cluster_sse`](https://emilhvitfeldt.github.io/tidyclust/reference/within_cluster_sse.html) to calculate the Sum of Squared Error in each cluster
+
+```{r}
+hc_fit %>%
+  tidyclust::within_cluster_sse() %>%
+  reactable::reactable(defaultPageSize = 5)
+
+```
+
+We use [`tidyclust::tot_sse`](https://emilhvitfeldt.github.io/tidyclust/reference/tot_sse.html) to calculate the total sum of squares.
+
+```{r}
+hc_fit %>% 
+  tot_sse() %>%
+  reactable::reactable(defaultPageSize = 5)
+```
+
+We use [`tidyclust::sse_ratio`](https://emilhvitfeldt.github.io/tidyclust/reference/sse_ratio.html) to calculate the ratio of the WSS to the total SSE.
+
+```{r}
+hc_fit %>% 
+  sse_ratio() %>%
+  reactable::reactable(defaultPageSize = 5)
+```
+
+We use [`tidyclust::silhouettes`](https://emilhvitfeldt.github.io/tidyclust/reference/silhouettes.html) to measure silhouettes between clusters for all observations.
+Ensure that the labels are removed.
+
+```{r}
+hc_fit %>% 
+  tidyclust::silhouettes(new_data = nci60_num_cluster) %>%
+  reactable::reactable(defaultPageSize = 5)
+  
+```
+
+We use [`tidyclust::avg_silhouette`](https://emilhvitfeldt.github.io/tidyclust/reference/avg_silhouette.html) to measure average silhouettes across all observations.
+Ensure that the labels are removed. (This is also the mean of the column `sil_width`)
+
+```{r}
+hc_fit %>% 
+  tidyclust::avg_silhouette(new_data = nci60_num_cluster) %>%
+  reactable::reactable(defaultPageSize = 5)
+```
+
+We use [`tidyclust::extract_cluster_assignment`](https://emilhvitfeldt.github.io/tidyclust/reference/extract_cluster_assignment.html) to see the cluster assignments. However, the labels need to be updated.
+
+```{r}
+hc_fit %>%
+  tidyclust::extract_cluster_assignment() %>%
+  dplyr::mutate(labels = nci60_scaled$label) %>%
+  reactable::reactable(defaultPageSize = 5)
+
+```
+
+Centroid can be extracted using [`extract_centroids`](https://emilhvitfeldt.github.io/tidyclust/reference/extract_centroids.html). Here is a preview of the first few columns. For hierarchical clustering, the geometric mean over the predictors for each cluster is used.
+
+```{r}
+hc_fit_centroids <- hc_fit %>% 
+  tidyclust::extract_centroids()
+
+hc_fit_centroids[,1:10] %>%
+  reactable::reactable(defaultPageSize = 5)
+```
+
+Here is how to see the plots. `hc_fit$fit` gives back the `hclust` object. We can plot the hierarchical clustering results.
+
+```{r}
+#| message: false
+#| warning: false
+
+
+hc_fit$fit$labels <- nci60_scaled$label
+factoextra::fviz_dend(hc_fit$fit, main = "complete", k = 3)
+
+stats::cutree(tree = hc_fit$fit, k = 3)
+```
+
+Alternatively, we can use [`tidyclust::extract_fit_summary`](https://emilhvitfeldt.github.io/tidyclust/reference/extract_fit_summary.html) as well.
+
+```{r}
+hc_summary <- hc_fit %>% 
+  tidyclust::extract_fit_summary() 
+```
+
+Here is how you can do k-means clustering using [`tidyclust::k_means`](https://emilhvitfeldt.github.io/tidyclust/reference/k_means.html).
+
+```{r}
+
+km_spec <- tidyclust::k_means(num_clusters = 5) %>%
+  parsnip::set_engine("stats", algorithm = "Lloyd")
+
+km_fit <- km_spec %>%
+  tidyclust::fit(label ~.,data = nci60_scaled)
+
+km_summary <- km_fit %>% extract_fit_summary()
+```
+
+`stats::predict` returns the cluster a new observation belongs to
+
+```{r}
+
+km_preds <- predict(km_fit, nci60_num_cluster, prefix = "KM_")
+hc_preds <- predict(hc_fit, nci60_num_cluster, prefix = "HC_")
+```
+
+However, `stats::predict` on the "training data" will not necessarily produce the same results as [`tidyclust::extract_cluster_assignment`](https://emilhvitfeldt.github.io/tidyclust/reference/extract_cluster_assignment.html)
+
+```{r}
+cbind(
+  hc_preds,
+  tidyclust::extract_cluster_assignment(hc_fit),
+  nci60_scaled$label) %>%
+  reactable::reactable(defaultPageSize = 5)
+  
+```
+
+`tidyclust` also have a useful function called [`tidyclust::reconcile_clusterings`](https://emilhvitfeldt.github.io/tidyclust/reference/reconcile_clusterings.html) to match clusters from k-means with the clusters from hierarchical clustering.
+
+```{r}
+
+cluster_table <- tidyclust::reconcile_clusterings(
+  primary_cluster_assignment = hc_preds$.pred_cluster, 
+  alt_cluster_assignment = km_preds$.pred_cluster,
+  one_to_one = FALSE
+)
+
+cluster_table %>%
+  dplyr::mutate(labels = nci60_scaled$label) %>%
+  reactable::reactable(defaultPageSize = 5,
+                       filterable = TRUE)
+
+```
+
+We can see that `KM_1` and `KM_2` is matched to `HC_1`, `KM_3` is matched to `HC_2`, `KM_4` and `KM_5` is matched to `HC_3`.
+
 # Blog References
 
 -   Tengku Hanis's [blog](https://tengkuhanis.netlify.app/post/explore-data-using-pca/) titled "Explore data using PCA"
@@ -1594,7 +1766,9 @@ packages <- c("base", "ggplot2", "rmarkdown", "cluster",
               "magrittr", "Matrix", "parsnip", "proxy",
               "purrr", "reactable", "reactablefmtr", "recipes",
               "scales", "softImpute", "stringr", "styler",
-              "tibble", "tidyr", "yardstick")
+              "tibble", "tidyr", "yardstick", "tidyclust",
+              "rsample", "tune", "dials", "workflows",
+              "Rfast","flexclust")
 
 table <- tibble::tibble(Packages = packages)
 
