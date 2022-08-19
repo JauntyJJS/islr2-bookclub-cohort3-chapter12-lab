@@ -807,7 +807,7 @@ ggplot2::ggplot(data = predicted_kmeans,
 
 ```
 
-## Exploration Base R
+## Exploration
 
 In reality, we will not know how many clusters is required for a given dataset. We need to try out a number of different values of $K$ and then find the best one.
 
@@ -1580,7 +1580,7 @@ nci60_num_cluster <- nci60_scaled %>%
 
 ```
 
-[`tidyclust::hier_clust`](https://emilhvitfeldt.github.io/tidyclust/reference/hier_clust.html) is used to do the hierarchical clustering. Here, we set the number of clusters to four and use the complete linkage method. It actually uses [`stats::hclust()`](https://rdrr.io/r/stats/hclust.html) and Euclidean distance under the hood.
+[`tidyclust::hier_clust`](https://emilhvitfeldt.github.io/tidyclust/reference/hier_clust.html) is used to do the hierarchical clustering. Here, we set the number of clusters to three and use the complete linkage method. It actually uses [`stats::hclust()`](https://rdrr.io/r/stats/hclust.html) and Euclidean distance under the hood.
 
 ```{r}
 
