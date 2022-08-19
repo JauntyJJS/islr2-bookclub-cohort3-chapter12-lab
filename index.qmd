@@ -1605,7 +1605,7 @@ We use [`tidyclust::tot_sse`](https://emilhvitfeldt.github.io/tidyclust/referenc
 
 ```{r}
 hc_fit %>% 
-  tot_sse() %>%
+  tidyclust::tot_sse() %>%
   reactable::reactable(defaultPageSize = 5)
 ```
 
@@ -1613,7 +1613,7 @@ We use [`tidyclust::sse_ratio`](https://emilhvitfeldt.github.io/tidyclust/refere
 
 ```{r}
 hc_fit %>% 
-  sse_ratio() %>%
+  tidyclust::sse_ratio() %>%
   reactable::reactable(defaultPageSize = 5)
 ```
 
