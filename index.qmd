@@ -502,7 +502,14 @@ initialisation_data_pca[ismiss] <- Xapp[ismiss]
 mss_old_pca <- mean(((missing_data - Xapp)[!ismiss])^2)
 
 initialisation_data_pca %>%   
-  reactable::reactable(defaultPageSize = 6)
+  reactable::reactable(defaultPageSize = 6,
+    columns = list(
+      SBP = reactable::colDef(format = reactable::colFormat(digits = 2)),
+      DBP = reactable::colDef(format = reactable::colFormat(digits = 2))
+    ),
+    defaultColDef = reactable::colDef(
+      style = colour_missing_cells
+    ))
 
 mss_old_pca
 ```
@@ -524,7 +531,14 @@ initialisation_data_svd[ismiss] <- Xapp[ismiss]
 mss_old_svd <- mean(((missing_data - Xapp)[!ismiss])^2)
 
 initialisation_data_svd %>%   
-  reactable::reactable(defaultPageSize = 6)
+  reactable::reactable(defaultPageSize = 6,
+    columns = list(
+      SBP = reactable::colDef(format = reactable::colFormat(digits = 2)),
+      DBP = reactable::colDef(format = reactable::colFormat(digits = 2))
+    ),
+    defaultColDef = reactable::colDef(
+      style = colour_missing_cells
+    ))
 
 mss_old_svd
 ```
