@@ -89,6 +89,7 @@ library(ggforce, quietly=TRUE)
 
 # For applying tidymodels
 library(recipes, quietly=TRUE)
+# From GitHub remotes::install_github("tidymodels/parsnip")
 library(parsnip, quietly=TRUE)
 library(broom, quietly=TRUE)
 library(yardstick, quietly=TRUE)
@@ -99,6 +100,7 @@ library(factoextra, quietly=TRUE)
 library(cluster, quietly=TRUE)
 
 # For tidy clustering
+# From GitHub remotes::install_github("tidymodels/workflows@celery")
 library(workflows, quietly=TRUE)
 library(rsample, quietly=TRUE)
 library(tune, quietly=TRUE)
@@ -1580,6 +1582,50 @@ nci60_num_cluster <- nci60_scaled %>%
 
 ```
 
+Here is how we can create the clustering elbow plot using `tidyclust`
+
+```{r}
+kmeans_spec <- tidyclust::k_means(
+  num_clusters = tune::tune())
+
+nci60_cv <- rsample::vfold_cv(nci60_num_cluster, v = 5)
+
+nci60_rec <- recipes::recipe(formula = ~ ., data = nci60_num_cluster)
+
+kmeans_wflow <- workflows::workflow(nci60_rec, kmeans_spec)
+
+clust_num_grid <- dials::grid_regular(
+  tidyclust::num_clusters(range = c(1, 15)), 
+  levels = 15)
+
+clust_num_grid %>%
+  reactable::reactable(defaultPageSize = 5)
+
+res <- tidyclust::tune_cluster(
+ kmeans_wflow,
+ resamples = nci60_cv,
+ grid = clust_num_grid,
+ control = tune::control_grid(save_pred = TRUE, extract = identity),
+ metrics = tidyclust::cluster_metric_set(tidyclust::sse_ratio)
+) 
+
+res_metrics <- res %>% tune::collect_metrics()
+
+res_metrics %>%
+  reactable::reactable(defaultPageSize = 5)
+
+res_metrics %>%
+  dplyr::filter(.metric == "sse_ratio") %>%
+  ggplot2::ggplot(aes(x = .data[["num_clusters"]], 
+                      y = .data[["mean"]])) +
+  ggplot2::geom_point() + 
+  ggplot2::geom_line() + 
+  ylab("mean WSS/TSS ratio, over 5 folds") +
+  xlab("Number of clusters") +
+  scale_x_continuous(breaks = 1:15)
+```
+
+
 [`tidyclust::hier_clust`](https://emilhvitfeldt.github.io/tidyclust/reference/hier_clust.html) is used to do the hierarchical clustering. Here, we set the number of clusters to three and use the complete linkage method. It actually uses [`stats::hclust()`](https://rdrr.io/r/stats/hclust.html) and Euclidean distance under the hood.
 
 ```{r}
@@ -1634,6 +1680,22 @@ Ensure that the labels are removed. (This is also the mean of the column `sil_wi
 hc_fit %>% 
   tidyclust::avg_silhouette(new_data = nci60_num_cluster) %>%
   reactable::reactable(defaultPageSize = 5)
+```
+
+Use [`tidyclust::cluster_metric_set`](https://emilhvitfeldt.github.io/tidyclust/reference/cluster_metric_set.html) to combine the metrics together.
+
+```{r}
+many_metrics <- tidyclust::cluster_metric_set(
+  tidyclust::tot_wss,
+  tidyclust::tot_sse,
+  tidyclust::sse_ratio,
+  tidyclust::avg_silhouette)
+
+# new_data required for tidyclust::avg_silhouette to work
+hc_fit %>%
+  many_metrics(new_data = nci60_num_cluster) %>%
+  reactable::reactable(defaultPageSize = 5)
+
 ```
 
 We use [`tidyclust::extract_cluster_assignment`](https://emilhvitfeldt.github.io/tidyclust/reference/extract_cluster_assignment.html) to see the cluster assignments. However, the labels need to be updated.
@@ -1715,9 +1777,9 @@ tibble(
   hc = hc_preds$.pred_cluster,
   km = km_preds$.pred_cluster
 ) %>% 
-  dplyr::count(hc, km)
+  dplyr::count(.data[["hc"]], .data[["km"]]) %>%
+  reactable::reactable(defaultPageSize = 5)
 ```
-
 
 `tidyclust` also have a useful function called [`tidyclust::reconcile_clusterings`](https://emilhvitfeldt.github.io/tidyclust/reference/reconcile_clusterings.html) to match clusters from k-means with the clusters from hierarchical clustering.
 
