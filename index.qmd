@@ -69,6 +69,9 @@ library(purrr, quietly=TRUE)
 library(tibble, quietly=TRUE)
 library(stringr, quietly=TRUE)
 
+# View PCA
+library(langevitour, quietly=TRUE)
+
 # Matrix Completion
 library(softImpute, quietly=TRUE)
 
@@ -1265,6 +1268,20 @@ nci60_pca_score %>%
 
 ```
 
+To view them interactively, consider using [langevitour::langevitour](https://logarithmic.net/langevitour/reference/langevitour.html) from the R package [langevitour](https://logarithmic.net/langevitour/index.html)
+
+```{r}
+nci60_pca_score_filtered <- nci60_pca_score %>%
+  dplyr::select(c("label", 
+                  "PC01","PC02", "PC03",
+                  "PC04","PC05", "PC06")
+                )
+
+langevitour::langevitour(
+    nci60_pca_score_filtered[,-1], nci60_pca_score_filtered$label,
+    pointSize=2)
+```
+
 How much variation are we capturing for each component?
 
 We extract the pca loadings of the pca step.
@@ -1855,7 +1872,7 @@ packages <- c("base", "ggplot2", "rmarkdown", "cluster",
               "scales", "softImpute", "stringr", "styler",
               "tibble", "tidyr", "yardstick", "tidyclust",
               "rsample", "tune", "dials", "workflows",
-              "Rfast","flexclust")
+              "Rfast","flexclust", "langevitour")
 
 table <- tibble::tibble(Packages = packages)
 
