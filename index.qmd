@@ -18,7 +18,6 @@ format:
     number-sections: false
     code-fold: show
     code-overflow: scroll
-    code-line-numbers: true
     code-copy: hover
     code-tools: true
     code-link: true
@@ -218,6 +217,17 @@ tidied_pca_loadings %>%
   reactable::reactable(defaultPageSize = 5)
 
 ```
+
+Here are the pca loadings in wide table form.
+
+```{r}
+tidied_pca_loadings %>% 
+  tidyr::pivot_wider(names_from = .data[["component"]], 
+                     values_from = .data[["value"]]) %>% 
+  dplyr::select(-dplyr::all_of("id")) %>% 
+  reactable::reactable(defaultPageSize = 5)
+```
+
 
 We make a visualization to see how the loadings of the four components look like
 
@@ -1107,7 +1117,7 @@ gridExtra::grid.arrange(p1, p2, p3, ncol = 1)
 
 ```
 
-Another way of calculating distances is based on pearson correlation using [proxy::dist]. However, this only makes sense if we have data with 3 or more variables.
+Another way of calculating distances is based on pearson correlation using `proxy::dist`. However, this only makes sense if we have data with 3 or more variables.
 
 ```{r}
 #| message: false
@@ -1615,7 +1625,7 @@ nci60_num_cluster <- nci60_scaled %>%
 
 Here is how we can create the clustering elbow plot using `tidyclust`
 
-```{r}
+```{r fig.height = 8}
 kmeans_spec <- tidyclust::k_means(
   num_clusters = tune::tune())
 
@@ -1637,7 +1647,10 @@ res <- tidyclust::tune_cluster(
  resamples = nci60_cv,
  grid = clust_num_grid,
  control = tune::control_grid(save_pred = TRUE, extract = identity),
- metrics = tidyclust::cluster_metric_set(tidyclust::sse_ratio)
+ metrics = tidyclust::cluster_metric_set(  
+  tidyclust::tot_wss,
+  tidyclust::tot_sse,
+  tidyclust::sse_ratio)
 ) 
 
 res_metrics <- res %>% tune::collect_metrics()
@@ -1646,14 +1659,28 @@ res_metrics %>%
   reactable::reactable(defaultPageSize = 5)
 
 res_metrics %>%
-  dplyr::filter(.metric == "sse_ratio") %>%
-  ggplot2::ggplot(aes(x = .data[["num_clusters"]], 
-                      y = .data[["mean"]])) +
-  ggplot2::geom_point() + 
-  ggplot2::geom_line() + 
-  ylab("mean WSS/TSS ratio, over 5 folds") +
+  ggplot2::ggplot(
+    mapping = ggplot2::aes(x = .data[["num_clusters"]], 
+                           y = .data[["mean"]],
+                           colour = .data[[".metric"]])
+    ) +
+  ggplot2::geom_errorbar(
+    mapping = ggplot2::aes(
+      ymin = .data[["mean"]] - .data[["std_err"]],
+      ymax = .data[["mean"]] + .data[["std_err"]]
+    ),
+    alpha = 0.8
+  ) +
+  ggplot2::geom_line(size = 1) + 
+  ggplot2::facet_wrap(
+    facets = ggplot2::vars(.data[[".metric"]]),
+    scales = "free",
+    nrow = 3
+  ) +
+  ylab("mean over 5 folds") +
   xlab("Number of clusters") +
-  scale_x_continuous(breaks = 1:15)
+  scale_x_continuous(breaks = 1:15) + 
+  ggplot2::theme(legend.position = "none")
 ```
 
 
@@ -1843,7 +1870,7 @@ We can see that `KM_1` and `KM_2` is matched to `HC_1`, `KM_3` is matched to `HC
 
 -   Tidymodels' [tutorial](https://www.tidymodels.org/learn/statistics/k-means/) titled "K-means clustering with tidy data principles"
     
--   Emil Hvitfeldt's ISLR tidymodels Labs [Chapter 12](https://emilhvitfeldt.github.io/ISLR-tidymodels-labs/unsupervised-learning.html)
+-   Emil Hvitfeldt's ISLR tidymodels Labs [Chapter 12](https://emilhvitfeldt.github.io/ISLR-tidymodels-labs/12-unsupervised-learning.html)
 
 -   [Eric (R_ic)](https://twitter.com/ericntay) RPubs's [post](https://rpubs.com/eR_ic/clustering) titled "Train and Evaluate Clustering Models using Tidymodels and friends"
 
